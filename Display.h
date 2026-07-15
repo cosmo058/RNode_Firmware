@@ -22,7 +22,8 @@
   #elif BOARD_MODEL == BOARD_HELTEC_T114
     #include "ST7789.h"
     #define COLOR565(r, g, b) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3))
-  #elif BOARD_MODEL == BOARD_TBEAM_S_V1
+  #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_STATION_G2
+    #include <Wire.h>
     #include <Adafruit_SH110X.h>
   #else
     #include <Wire.h>
@@ -96,6 +97,12 @@
   #define SCL_OLED 6
   #define SDA_OLED 5
   #define DISP_CUSTOM_ADDR true
+#elif BOARD_MODEL == BOARD_STATION_G2
+  #define DISP_RST -1
+  #define DISP_ADDR 0x3C
+  #define SCL_OLED 6
+  #define SDA_OLED 5
+  #define DISP_CUSTOM_ADDR false
 #else
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
@@ -114,6 +121,23 @@
   #define SSD1306_BLACK ST77XX_BLACK
 #elif BOARD_MODEL == BOARD_TBEAM_S_V1
   Adafruit_SH1106G display = Adafruit_SH1106G(128, 64, &Wire, -1);
+  #define SSD1306_WHITE SH110X_WHITE
+  #define SSD1306_BLACK SH110X_BLACK
+#elif BOARD_MODEL == BOARD_STATION_G2
+  // The 1.3 inch OLED on the Station G2 uses a CH1115
+  // controller, which behaves like an SH1106 with its
+  // internal DC-DC converter enabled, but without the
+  // SH1106's 2-pixel column offset into display memory.
+  class CH1115Display : public Adafruit_SH1106G {
+    public:
+      CH1115Display(uint16_t w, uint16_t h, TwoWire *twi, int8_t rst) : Adafruit_SH1106G(w, h, twi, rst) {}
+      bool begin(uint8_t addr, bool reset) {
+        bool result = Adafruit_SH1106G::begin(addr, reset);
+        _page_start_offset = 0;
+        return result;
+      }
+  };
+  CH1115Display display = CH1115Display(128, 64, &Wire, -1);
   #define SSD1306_WHITE SH110X_WHITE
   #define SSD1306_BLACK SH110X_BLACK
 #elif BOARD_MODEL == BOARD_TECHO
@@ -228,6 +252,9 @@ uint8_t display_contrast = 0x00;
 #if BOARD_MODEL == BOARD_TBEAM_S_V1
   void set_contrast(Adafruit_SH1106G *display, uint8_t value) {
   }
+#elif BOARD_MODEL == BOARD_STATION_G2
+  void set_contrast(Adafruit_SH110X *display, uint8_t value) {
+  }
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   void set_contrast(ST7789Spi *display, uint8_t value) { }
 #elif BOARD_MODEL == BOARD_TECHO
@@ -323,6 +350,8 @@ bool display_init() {
       Wire.begin(SDA_OLED, SCL_OLED);
     #elif BOARD_MODEL == BOARD_XIAO_S3
       Wire.begin(SDA_OLED, SCL_OLED);
+    #elif BOARD_MODEL == BOARD_STATION_G2
+      Wire.begin(SDA_OLED, SCL_OLED);
     #endif
 
     #if HAS_EEPROM
@@ -376,7 +405,7 @@ bool display_init() {
     // set white as default pixel colour for Heltec T114
     display.setRGB(COLOR565(0xFF, 0xFF, 0xFF));
     if (false) {
-    #elif BOARD_MODEL == BOARD_TBEAM_S_V1
+    #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_STATION_G2
     if (!display.begin(display_address, true)) {
     #else
     if (!display.begin(SSD1306_SWITCHCAPVCC, display_address)) {
@@ -411,6 +440,9 @@ bool display_init() {
           disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(0);
         #elif BOARD_MODEL == BOARD_TBEAM_S_V1
+          disp_mode = DISP_MODE_PORTRAIT;
+          display.setRotation(1);
+        #elif BOARD_MODEL == BOARD_STATION_G2
           disp_mode = DISP_MODE_PORTRAIT;
           display.setRotation(1);
         #elif BOARD_MODEL == BOARD_HELTEC32_V2

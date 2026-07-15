@@ -70,6 +70,10 @@
   #define MODEL_DE            0xDE // Xiao ESP32S3 with Wio-SX1262 module, 433 MHz
   #define MODEL_DD            0xDD // Xiao ESP32S3 with Wio-SX1262 module, 868 MHz
 
+  #define PRODUCT_STATION_G2  0xE2
+  #define BOARD_STATION_G2    0x45
+  #define MODEL_E5            0xE5 // B&Q Consulting Station G2, 815-940 MHz, max 35dBm PA output
+
   #define PRODUCT_T32_10      0xB2
   #define BOARD_LORA32_V1_0   0x39
   #define MODEL_BA            0xBA // LilyGO T3 v1.0, 433 MHz
@@ -149,9 +153,10 @@
     #endif
   #endif
 
-  #define LORA_PA_UNKNOWN  0x00
-  #define LORA_PA_GC1109   0x01
-  #define LORA_PA_KCT8103L 0x02
+  #define LORA_PA_UNKNOWN    0x00
+  #define LORA_PA_GC1109     0x01
+  #define LORA_PA_KCT8103L   0x02
+  #define LORA_PA_INTEGRATED 0x03 // PA with no MCU control lines
 
   #define HAS_DISPLAY false
   #define HAS_BLUETOOTH false
@@ -713,6 +718,71 @@
           const int pin_led_tx = 48;
         #endif
       #endif
+
+    #elif BOARD_MODEL == BOARD_STATION_G2
+      #define IS_ESP32S3 true
+      #define MODEM SX1262
+      #define DIO2_AS_RF_SWITCH true
+      #define HAS_BUSY true
+      #define HAS_TCXO true
+      #define OCP_TUNED 0x28
+
+      #define HAS_DISPLAY true
+      #define HAS_CONSOLE true
+      #define HAS_WIFI true
+      #define HAS_BLUETOOTH false
+      #define HAS_BLE true
+      #define HAS_PMU false
+      #define HAS_NP false
+      #define HAS_SD false
+      #define HAS_EEPROM true
+
+      #define HAS_INPUT true
+      #define HAS_SLEEP false
+
+      // The Station G2 PA and LNA sit between the SX1262
+      // and the antenna port, and have no control lines to
+      // the MCU. The PA is powered by a dedicated 7.5v rail,
+      // which is only available when the device is supplied
+      // by 15v USB-C PD, or by the 9-19v DC input. On plain
+      // 5v USB power, the modem still works, but output is
+      // heavily attenuated by the unpowered PA.
+      #define HAS_LORA_PA true
+      #define HAS_LORA_LNA true
+      #define LORA_PA_MODEL LORA_PA_INTEGRATED
+      #define LORA_PA_PWR_EN -1
+      #define LORA_PA_CSD    -1
+      #define LORA_PA_CPS    -1
+      #define LORA_PA_CTX    -1
+
+      // PA gain values indexed by modem output power, from
+      // the conduction test data published by the manufacturer:
+      // https://wiki.uniteng.com/en/meshtastic/station-g2
+      // Total output is capped at the PA P1dB point of 35 dBm,
+      // which corresponds to 16 dBm of modem output, keeping
+      // the modem well below the 19 dBm PA saturation limit.
+      #define PA_MAX_OUTPUT  35
+      #define PA_GAIN_POINTS 17
+      #define PA_GAIN_VALUES 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 19, 19
+      #define LORA_LNA_GAIN 19
+      #define LORA_LNA_GVT  12
+
+      const int pin_btn_usr1 = 38;
+
+      const int pin_cs = 11;
+      const int pin_reset = 21;
+      const int pin_sclk = 12;
+      const int pin_mosi = 13;
+      const int pin_miso = 14;
+      const int pin_tcxo_enable = -1;
+      const int pin_dio = 48;
+      const int pin_busy = 47;
+
+      // The Station G2 has no MCU controllable LEDs. The pin
+      // below only drives the unused debug UART TX line, and
+      // LED signalling is disabled in Utilities.h.
+      const int pin_led_rx = 43;
+      const int pin_led_tx = 43;
 
     #else
       #error An unsupported ESP32 board was selected. Cannot compile RNode firmware.
