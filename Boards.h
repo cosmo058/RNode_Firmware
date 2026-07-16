@@ -108,6 +108,10 @@
   #define MODEL_C6            0xC6 // Heltec Mesh Node T114, 470-510 MHz
   #define MODEL_C7            0xC7 // Heltec Mesh Node T114, 863-928 MHz
 
+  #define PRODUCT_HELTEC_T096 0xCB // Heltec Mesh Node T096
+  #define BOARD_HELTEC_T096   0x46
+  #define MODEL_CC            0xCC // Heltec Mesh Node T096, 863-928 MHz, max 28dBm PA output
+
   #define PRODUCT_TECHO       0x15 // LilyGO T-Echo devices
   #define BOARD_TECHO         0x44
   #define MODEL_16            0x16 // T-Echo 433 MHz
@@ -964,6 +968,87 @@
       const int DISPLAY_CLK = PIN_T114_TFT_SCK;
       const int DISPLAY_BL_PIN = PIN_T114_TFT_BLGT;
       const int DISPLAY_RST = PIN_T114_TFT_RST;
+
+    #elif BOARD_MODEL == BOARD_HELTEC_T096
+      #define MODEM SX1262
+      #define HAS_EEPROM false
+      #define HAS_DISPLAY true
+      #define HAS_BLUETOOTH false
+      #define HAS_BLE true
+      #define HAS_CONSOLE false
+      #define HAS_PMU true
+      #define HAS_NP false
+      #define HAS_SD false
+      #define HAS_TCXO true
+      #define HAS_BUSY true
+      #define HAS_INPUT true
+      #define HAS_SLEEP true
+      #define DIO2_AS_RF_SWITCH true
+      #define CONFIG_UART_BUFFER_SIZE 6144
+      #define CONFIG_QUEUE_SIZE 6144
+      #define CONFIG_QUEUE_MAX_LENGTH 200
+      #define EEPROM_SIZE 296
+      #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
+      #define BLE_MANUFACTURER "Heltec"
+      #define BLE_MODEL "T096"
+
+      // Power control. Vext supplies the TFT, the
+      // GNSS enable is active low and kept off, as
+      // the firmware does not use the UC6580.
+      #define PIN_VEXT_EN 26
+      #define PIN_T096_ADC_EN 47
+      #define PIN_T096_GNSS_EN 6
+
+      // KCT8103L PA/LNA front end. Unlike the Heltec
+      // V4, the FEM model is fixed, so no runtime
+      // detection is needed. The CPS pin is driven by
+      // the SX1262 DIO2 directly.
+      #define HAS_LORA_PA true
+      #define HAS_LORA_LNA true
+      #define LORA_PA_MODEL LORA_PA_KCT8103L
+      #define LORA_PA_PWR_EN 30
+      #define LORA_PA_CSD    12
+      #define LORA_PA_CPS    -1
+      #define LORA_PA_CTX    41
+
+      // PA gain values indexed by modem output power,
+      // from the conduction test data published by the
+      // manufacturer. Total output is capped at the
+      // rated maximum of 28 dBm.
+      #define PA_MAX_OUTPUT  28
+      #define PA_GAIN_POINTS 22
+      #define PA_GAIN_VALUES 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 13, 13, 13, 12, 11, 10, 9, 8, 7
+      #define LORA_LNA_GAIN  21
+      #define LORA_LNA_GVT   12
+
+      // Single green LED, active high
+      const int pin_led_rx = 28;
+      const int pin_led_tx = 28;
+
+      // User button
+      const int pin_btn_usr1 = 42;
+
+      // SX1262
+      const int pin_cs = 5;
+      const int pin_reset = 16;
+      const int pin_sclk = 40;
+      const int pin_mosi = 11;
+      const int pin_miso = 14;
+      const int pin_busy = 19;
+      const int pin_dio = 21;
+      const int pin_tcxo_enable = -1;
+
+      // ST7735S 80x160 TFT. The panel has no MISO
+      // line, so an unused GPIO is assigned to
+      // satisfy the SPIM peripheral.
+      #define DISPLAY_SCALE 1
+      const int DISPLAY_DC = 15;
+      const int DISPLAY_CS = 22;
+      const int DISPLAY_MISO = 24;
+      const int DISPLAY_MOSI = 17;
+      const int DISPLAY_CLK = 20;
+      const int DISPLAY_BL_PIN = 44;
+      const int DISPLAY_RST = 13;
 
     #else
       #error An unsupported nRF board was selected. Cannot compile RNode firmware.

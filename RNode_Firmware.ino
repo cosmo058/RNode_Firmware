@@ -88,6 +88,13 @@ void setup() {
       pinMode(PIN_LED_GREEN, OUTPUT);
       pinMode(PIN_LED_BLUE, OUTPUT);
       delay(200);
+    #elif BOARD_MODEL == BOARD_HELTEC_T096
+      // Enable the Vext supply for the TFT, and keep
+      // the unused GNSS receiver powered off
+      pinMode(PIN_VEXT_EN, OUTPUT);
+      digitalWrite(PIN_VEXT_EN, HIGH);
+      pinMode(PIN_T096_GNSS_EN, OUTPUT);
+      digitalWrite(PIN_T096_GNSS_EN, HIGH);
     #endif
 
     if (!eeprom_begin()) { Serial.write("EEPROM initialisation failed.\r\n"); }
@@ -129,7 +136,7 @@ void setup() {
     boot_seq();
   #endif
 
-  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_STATION_G2
+  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_STATION_G2
     // Some boards need to wait until the hardware UART is set up before booting
     // the full firmware. In the case of the RAK4631 and Heltec T114, the line below will wait
     // until a serial connection is actually established with a master. Thus, it
@@ -1790,6 +1797,10 @@ void sleep_now() {
         digitalWrite(PIN_VEXT_EN, LOW);
         digitalWrite(PIN_T114_TFT_BLGT, HIGH);
         digitalWrite(PIN_T114_TFT_EN, HIGH);
+      #elif BOARD_MODEL == BOARD_HELTEC_T096
+        digitalWrite(DISPLAY_BL_PIN, LOW);
+        digitalWrite(PIN_VEXT_EN, LOW);
+        digitalWrite(LORA_PA_PWR_EN, LOW);
       #elif BOARD_MODEL == BOARD_TECHO
         for (uint8_t i = display_intensity; i > 0; i--) { analogWrite(pin_backlight, i-1); delay(1); }
         epd_black(true); delay(300); epd_black(true); delay(300); epd_black(false);

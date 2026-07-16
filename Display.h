@@ -19,6 +19,8 @@
 #if BOARD_MODEL != BOARD_TECHO
   #if BOARD_MODEL == BOARD_TDECK
     #include <Adafruit_ST7789.h>
+  #elif BOARD_MODEL == BOARD_HELTEC_T096
+    #include <Adafruit_ST7735.h>
   #elif BOARD_MODEL == BOARD_HELTEC_T114
     #include "ST7789.h"
     #define COLOR565(r, g, b) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3))
@@ -103,6 +105,10 @@
   #define SCL_OLED 6
   #define SDA_OLED 5
   #define DISP_CUSTOM_ADDR false
+#elif BOARD_MODEL == BOARD_HELTEC_T096
+  #define DISP_RST -1
+  #define DISP_ADDR -1
+  #define DISP_CUSTOM_ADDR false
 #else
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
@@ -113,6 +119,11 @@
 
 #if BOARD_MODEL == BOARD_TDECK
   Adafruit_ST7789 display = Adafruit_ST7789(DISPLAY_CS, DISPLAY_DC, -1);
+  #define SSD1306_WHITE ST77XX_WHITE
+  #define SSD1306_BLACK ST77XX_BLACK
+#elif BOARD_MODEL == BOARD_HELTEC_T096
+  SPIClass displaySPI = SPIClass(NRF_SPIM0, DISPLAY_MISO, DISPLAY_CLK, DISPLAY_MOSI);
+  Adafruit_ST7735 display = Adafruit_ST7735(&displaySPI, DISPLAY_CS, DISPLAY_DC, DISPLAY_RST);
   #define SSD1306_WHITE ST77XX_WHITE
   #define SSD1306_BLACK ST77XX_BLACK
 #elif BOARD_MODEL == BOARD_HELTEC_T114
@@ -257,6 +268,12 @@ uint8_t display_contrast = 0x00;
   }
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   void set_contrast(ST7789Spi *display, uint8_t value) { }
+#elif BOARD_MODEL == BOARD_HELTEC_T096
+  // No contrast control, backlight is either on or off
+  void set_contrast(Adafruit_ST7735 *display, uint8_t value) {
+    if (value == 0) { digitalWrite(DISPLAY_BL_PIN, LOW); }
+    else            { digitalWrite(DISPLAY_BL_PIN, HIGH); }
+  }
 #elif BOARD_MODEL == BOARD_TECHO
   void set_contrast(void *display, uint8_t value) {
     if (value == 0) { analogWrite(pin_backlight, 0); }
@@ -400,6 +417,10 @@ bool display_init() {
     #elif BOARD_MODEL == BOARD_TDECK
     display.init(240, 320);
     display.setSPISpeed(80e6);
+    #elif BOARD_MODEL == BOARD_HELTEC_T096
+    display.initR(INITR_MINI160x80);
+    display.setSPISpeed(32e6);
+    if (false) {
     #elif BOARD_MODEL == BOARD_HELTEC_T114
     display.init();
     // set white as default pixel colour for Heltec T114
@@ -457,6 +478,9 @@ bool display_init() {
         #elif BOARD_MODEL == BOARD_HELTEC_T114
           disp_mode = DISP_MODE_PORTRAIT;
           display.setRotation(1);
+        #elif BOARD_MODEL == BOARD_HELTEC_T096
+          disp_mode = DISP_MODE_PORTRAIT;
+          display.setRotation(0);
         #elif BOARD_MODEL == BOARD_RAK4631
           disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(0);
@@ -501,6 +525,13 @@ bool display_init() {
 
       #if BOARD_MODEL == BOARD_TDECK
         display.fillScreen(SSD1306_BLACK);
+      #endif
+
+      #if BOARD_MODEL == BOARD_HELTEC_T096
+        // Clear the panel RAM and enable the backlight
+        display.fillScreen(SSD1306_BLACK);
+        pinMode(DISPLAY_BL_PIN, OUTPUT);
+        digitalWrite(DISPLAY_BL_PIN, HIGH);
       #endif
 
       #if BOARD_MODEL == BOARD_HELTEC_T114
@@ -1104,6 +1135,9 @@ void update_display(bool blank = false) {
         display.clear();
         display.display();
         digitalWrite(PIN_T114_TFT_BLGT, HIGH);
+      #elif BOARD_MODEL == BOARD_HELTEC_T096
+        display.fillScreen(SSD1306_BLACK);
+        digitalWrite(DISPLAY_BL_PIN, LOW);
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
         display.display();
@@ -1125,6 +1159,8 @@ void update_display(bool blank = false) {
       #if BOARD_MODEL == BOARD_HELTEC_T114
         display.clear();
         digitalWrite(PIN_T114_TFT_BLGT, LOW);
+      #elif BOARD_MODEL == BOARD_HELTEC_T096
+        digitalWrite(DISPLAY_BL_PIN, HIGH);
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
       #endif
@@ -1150,7 +1186,7 @@ void update_display(bool blank = false) {
           last_epd_refresh = millis();
           epd_blanked = false;
         }
-      #elif BOARD_MODEL != BOARD_TDECK
+      #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_HELTEC_T096
         display.display();
       #endif
 
