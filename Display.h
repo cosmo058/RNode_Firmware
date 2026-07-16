@@ -419,8 +419,12 @@ bool display_init() {
     display.init(240, 320);
     display.setSPISpeed(80e6);
     #elif BOARD_MODEL == BOARD_HELTEC_T096
+    // The display bus is not one of the core's predefined
+    // SPI interfaces, so the TFT library will not start it
+    // by itself. SPIM0 tops out at 8 MHz.
+    displaySPI.begin();
     display.initR(INITR_MINI160x80);
-    display.setSPISpeed(32e6);
+    display.setSPISpeed(8e6);
     if (false) {
     #elif BOARD_MODEL == BOARD_HELTEC_T114
     display.init();
