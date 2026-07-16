@@ -1798,7 +1798,7 @@ void sleep_now() {
         digitalWrite(PIN_T114_TFT_BLGT, HIGH);
         digitalWrite(PIN_T114_TFT_EN, HIGH);
       #elif BOARD_MODEL == BOARD_HELTEC_T096
-        digitalWrite(DISPLAY_BL_PIN, LOW);
+        digitalWrite(DISPLAY_BL_PIN, HIGH);
         digitalWrite(PIN_VEXT_EN, LOW);
         digitalWrite(LORA_PA_PWR_EN, LOW);
       #elif BOARD_MODEL == BOARD_TECHO

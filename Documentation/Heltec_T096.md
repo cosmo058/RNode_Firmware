@@ -112,7 +112,7 @@ Arduino pin number = P0.x → x, P1.y → 32+y.
 | SX1262 RESET / DIO1 / BUSY | P0.16 / P0.21 / P0.19 |
 | PA power (Vfem LDO) / CSD / CTX | P0.30 / P0.12 / P1.09 (41) |
 | TFT SCK / MOSI / CS / DC / RST | P0.20 / P0.17 / P0.22 / P0.15 / P0.13 |
-| TFT backlight (active high) | P1.12 (44) |
+| TFT backlight (active **low**, per Meshtastic `TFT_BACKLIGHT_ON=LOW`) | P1.12 (44) |
 | Vext enable (TFT supply, active high) | P0.26 |
 | User button (active low) | P1.10 (42) |
 | Green LED (active high, shared RX/TX) | P0.28 |
@@ -185,11 +185,12 @@ Things to verify on first flash, in order:
 1. **Enumerates as USB serial** after flashing (no manual reset should be
    needed; if unresponsive, double-press reset and reflash via UF2).
 2. **rnodeconf detects it** (`rnodeconf <PORT> -i` after provisioning).
-3. **Display shows the RNode boot screen.** If the panel is dark: check
-   backlight polarity (P1.12, assumed active high) and Vext (P0.26, assumed
-   active high). If the image is offset or mirrored: the `INITR_MINI160x80`
-   variant/rotation may need adjusting (`INITR_MINI160x80_PLUGIN` inverts
-   colors; offsets are 24/0).
+3. **Display shows the RNode boot screen.** The backlight is active LOW
+   (P1.12) — the first build got this wrong and produced a dark panel; the
+   polarity is confirmed by Meshtastic's `TFT_BACKLIGHT_ON=LOW` build flag.
+   Vext is P0.26, active high. If the image is offset or mirrored: the
+   `INITR_MINI160x80` variant/rotation may need adjusting
+   (`INITR_MINI160x80_PLUGIN` inverts colors; offsets are 24/0).
 4. **RX works** (see traffic / RSSI values plausible, ~-100 dBm noise floor
    after LNA compensation).
 5. **TX works at low power first** (set 14-17 dBm, confirm with another

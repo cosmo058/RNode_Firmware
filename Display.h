@@ -269,10 +269,11 @@ uint8_t display_contrast = 0x00;
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   void set_contrast(ST7789Spi *display, uint8_t value) { }
 #elif BOARD_MODEL == BOARD_HELTEC_T096
-  // No contrast control, backlight is either on or off
+  // No contrast control, backlight is either on or
+  // off. The backlight pin is active low.
   void set_contrast(Adafruit_ST7735 *display, uint8_t value) {
-    if (value == 0) { digitalWrite(DISPLAY_BL_PIN, LOW); }
-    else            { digitalWrite(DISPLAY_BL_PIN, HIGH); }
+    if (value == 0) { digitalWrite(DISPLAY_BL_PIN, HIGH); }
+    else            { digitalWrite(DISPLAY_BL_PIN, LOW); }
   }
 #elif BOARD_MODEL == BOARD_TECHO
   void set_contrast(void *display, uint8_t value) {
@@ -528,10 +529,11 @@ bool display_init() {
       #endif
 
       #if BOARD_MODEL == BOARD_HELTEC_T096
-        // Clear the panel RAM and enable the backlight
+        // Clear the panel RAM and enable the
+        // backlight (active low)
         display.fillScreen(SSD1306_BLACK);
         pinMode(DISPLAY_BL_PIN, OUTPUT);
-        digitalWrite(DISPLAY_BL_PIN, HIGH);
+        digitalWrite(DISPLAY_BL_PIN, LOW);
       #endif
 
       #if BOARD_MODEL == BOARD_HELTEC_T114
@@ -1137,7 +1139,7 @@ void update_display(bool blank = false) {
         digitalWrite(PIN_T114_TFT_BLGT, HIGH);
       #elif BOARD_MODEL == BOARD_HELTEC_T096
         display.fillScreen(SSD1306_BLACK);
-        digitalWrite(DISPLAY_BL_PIN, LOW);
+        digitalWrite(DISPLAY_BL_PIN, HIGH);
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
         display.display();
@@ -1160,7 +1162,7 @@ void update_display(bool blank = false) {
         display.clear();
         digitalWrite(PIN_T114_TFT_BLGT, LOW);
       #elif BOARD_MODEL == BOARD_HELTEC_T096
-        digitalWrite(DISPLAY_BL_PIN, HIGH);
+        digitalWrite(DISPLAY_BL_PIN, LOW);
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
       #endif
