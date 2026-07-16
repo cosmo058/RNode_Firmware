@@ -585,7 +585,24 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
 
 // Draws a bitmap to the display and auto scales it based on the boards configured DISPLAY_SCALE
 void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t bitmapWidth, int16_t bitmapHeight, uint16_t foregroundColour, uint16_t backgroundColour) {
-  #if DISPLAY_SCALE == 1
+  #if BOARD_MODEL == BOARD_HELTEC_T096
+    // Expand each canvas row to RGB565 and push it as a single
+    // transfer. Per-pixel drawing over SPI stalls the main loop
+    // long enough for the device to miss host command deadlines.
+    static uint16_t rowbuf[DISP_W];
+    if (bitmapWidth <= DISP_W) {
+      for (int16_t row = 0; row < bitmapHeight; row++) {
+        for (int16_t col = 0; col < bitmapWidth; col++) {
+          int16_t index = row * ((bitmapWidth + 7) / 8) + (col / 8);
+          uint8_t bitmask = 1 << (7 - (col % 8));
+          rowbuf[col] = (bitmap[index] & bitmask) ? foregroundColour : backgroundColour;
+        }
+        display.drawRGBBitmap(startX, startY + row, rowbuf, bitmapWidth, 1);
+      }
+    } else {
+      display.drawBitmap(startX, startY, bitmap, bitmapWidth, bitmapHeight, foregroundColour, backgroundColour);
+    }
+  #elif DISPLAY_SCALE == 1
     display.drawBitmap(startX, startY, bitmap, bitmapWidth, bitmapHeight, foregroundColour, backgroundColour);
   #else
     for(int16_t row = 0; row < bitmapHeight; row++){
