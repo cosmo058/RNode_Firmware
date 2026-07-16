@@ -147,6 +147,12 @@ uint32_t retrieve_application_size() {
     uint8_t bytes[4];
     memcpy(bytes, (const void*)IMG_SIZE_START, 4);
     uint32_t fw_len = bytes[0] | bytes[1] << 8 | bytes[2] << 16 | bytes[3] << 24;
+    // The image size in the bootloader settings page is only
+    // written by serial DFU flashing. After flashing by UF2
+    // drag-and-drop it reads as erased flash, and hashing the
+    // resulting bogus region hard-faults the device. Return an
+    // empty region instead, which simply fails validation.
+    if (fw_len > (0x100000 - APPLICATION_START)) fw_len = 0;
     return fw_len;
 }
 

@@ -8,9 +8,11 @@ Pinout and hardware parameters were taken from the Meshtastic
 `variants/nrf52840/heltec_mesh_node_t096` variant (develop branch) and the
 manufacturer's published conduction test data.
 
-> **Status:** compiles cleanly (245 KB, 11% of flash). Not yet verified on
-> hardware — see the [bring-up checklist](#hardware-bring-up-checklist) below
-> for the things to confirm on first boot.
+> **Status:** verified on real hardware 2026-07-16 — display, provisioning,
+> EEPROM, firmware validation all working (device cb:cc:46, serial
+> 00:00:00:02). Radio RX/TX and battery telemetry not yet field-tested.
+> Three hardware bring-up bugs were found and fixed; they are all described
+> in [Troubleshooting](#troubleshooting) so nobody has to rediscover them.
 
 ---
 
@@ -25,28 +27,37 @@ arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 -e \
   --build-property "upload.maximum_size=2097152" \
   --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x46\""
 
-# 2. Flash. Two options:
-#    a) UF2 drag-and-drop: double-press the reset button, a USB drive
-#       appears, copy build/Heltec_nRF52.Heltec_nRF52.HT-n5262/RNode_Firmware.ino.uf2 onto it.
-#    b) Serial DFU:
-arduino-cli upload -p <PORT> --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262
-#       (or: adafruit-nrfutil dfu serial --package build/.../RNode_Firmware.ino.zip -p <PORT> -b 115200)
+# 2. Flash over SERIAL DFU - this is the only fully correct method:
+arduino-cli upload -p <PORT> --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 --input-dir build/Heltec_nRF52.Heltec_nRF52.HT-n5262
+#    (equivalent: adafruit-nrfutil dfu serial --package <...>.zip -p <PORT> -b 115200 --touch 1200)
+#    No button presses needed: the 1200 baud touch enters the bootloader
+#    even if the running application is frozen, and the app auto-starts
+#    after flashing.
+#
+#    UF2 drag-and-drop (double-press reset, copy the .uf2) also works BUT
+#    does not update the bootloader's image-size record, so firmware
+#    validation always fails afterwards ("Firmware corrupt" on screen).
+#    Use it only for recovery, and follow up with a serial DFU flash.
 
-# 3. Provision the EEPROM (first time only - survives reflashes)
+# 3. Provision the EEPROM (first time only - survives reflashes).
+#    PATIENCE: the "Bootstrapping device EEPROM" step takes 30+ seconds
+#    of silence. Do not interrupt or power-cycle during it.
 rnodeconf <PORT> -r --product cb --model cc --hwrev 1
 
-# 4. Set the firmware hash (device self-attestation, like the T114):
+# 4. Set the firmware hash (device self-attestation, like the T114).
+#    The device reboots itself after the hash write; give it ~30 s.
 rnodeconf <PORT> -L          # prints "The actual firmware hash is: <hash>"
 rnodeconf <PORT> --firmware-hash <hash>
 
-# 5. Check state:
+# 5. Check state (target and actual hashes must match):
 rnodeconf <PORT> -i
+rnodeconf <PORT> -K
+rnodeconf <PORT> -L
 ```
 
 Unlike the ESP32-S3 based Station G2, the nRF52840 does **not** reset when
 the serial port is opened or closed, so plain rnodeconf works reliably for
-all configuration writes. No manual restart after flashing is needed either —
-the DFU bootloader starts the application automatically.
+all configuration writes.
 
 A healthy device reports:
 
@@ -75,6 +86,19 @@ The stock rnodeconf does not know this board. Patch the local
 - `models` dict: `0xCC: [863000000, 928000000, 28, "863 - 928 MHz", "rnode_firmware_heltec_t096.zip", "SX1262"],`
 
 ---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Backlight on, screen otherwise dark ("no image") | The display sits on a custom SPIM0 bus; `Adafruit_SPITFT::initSPI` only starts the core's predefined SPI interfaces, so without an explicit `displaySPI.begin()` the panel never receives a single bit. | Fixed in `Display.h` (commit `82cb168`). |
+| Screen completely dark | Backlight pin P1.12 is active **low** — declared only in Meshtastic's `platformio.ini` (`TFT_BACKLIGHT_ON=LOW`), not in `variant.h`. | Fixed in `Display.h` (commit `83fecab`). When porting from Meshtastic, always read `platformio.ini` build flags too. |
+| `rnodeconf` says "Could not download EEPROM" although the firmware version was read | rnodeconf gives the device only 0.6 s to answer. Per-pixel TFT drawing (~8000 SPI transactions/frame) stalled the main loop past that deadline. | Fixed with bulk row transfers (commit `e925999`). If it still happens right after a reboot, simply retry — the device is busiest during its first seconds. |
+| Device frozen after provisioning: USB port enumerates but nothing answers, screen black/stuck | Firmware was flashed via **UF2 drag-and-drop**, which leaves the bootloader's image-size record (flash `0xFF008`) erased. On a *provisioned* device, boot-time firmware validation then hashed a bogus 4 GB region and hard-faulted. | Reflash over **serial DFU** (`arduino-cli upload`), which writes the record. Firmware now also guards against this (`Device.h`): a UF2-flashed device fails validation gracefully ("Firmware corrupt") instead of freezing. |
+| Device stops responding during provisioning or `--firmware-hash`; rnodeconf hangs | The emulated EEPROM commits every byte to internal flash individually (~160 writes for provisioning); the device can wedge during such write storms while USB stays enumerated. The writes themselves usually complete first. | Reflash over serial DFU — the 1200 baud touch works even when the app is frozen and doubles as a remote reset. Then verify with `-i` / `-K` / `-L`; the interrupted writes are usually intact. |
+| "Firmware corrupt" on display | Target hash unset (fresh provision), stale (set for a different build), or the device was UF2-flashed (see above). | After every reflash: `rnodeconf <PORT> -L`, then `--firmware-hash <hash>`, then let it reboot. If UF2-flashed, serial-DFU reflash first. |
+| Port number changes / device briefly gone | The nRF re-enumerates USB after every reset (including the self-reset after `--firmware-hash`). | Wait ~10-30 s, re-check the port list. |
+| `rnodeconf -i` crashes with `KeyError: 204` | Stock rnodeconf doesn't know model `0xCC`. | Apply the rnodeconf patch from [Prerequisites](#prerequisites-one-time-host-setup). |
 
 ## Hardware and port details
 
@@ -166,6 +190,7 @@ changed with `rnodeconf --display-rotation`. Backlight is on/off only
 | `sx126x.cpp` | 1.8 V DIO3 TCXO for this board |
 | `RNode_Firmware.ino` | Vext/GNSS power setup, serial-wait exclusion, sleep power-down |
 | `Display.h` | Adafruit_ST7735 display path (SPIM0), backlight control, blanking |
+| `Device.h` | Guard against unwritten bootloader image-size record (UF2 flashing) |
 | `Power.h` | Battery sensing (AIN1, divider 4.916, ADC enable pin) |
 | `Makefile` | `firmware-heltec_t096`, `upload-heltec_t096`, `release-heltec_t096` targets |
 
@@ -178,24 +203,22 @@ changed with `rnodeconf --display-rotation`. Backlight is on/off only
 
 ---
 
-## Hardware bring-up checklist
+## Hardware verification status
 
-Things to verify on first flash, in order:
+Verified on the real device (2026-07-16): USB enumeration and serial DFU
+flashing, display (portrait, rotation 0, correct backlight), EEPROM
+provisioning as `cb:cc:46`, device signature validation, firmware hash
+validation (target == actual, no "Firmware corrupt").
 
-1. **Enumerates as USB serial** after flashing (no manual reset should be
-   needed; if unresponsive, double-press reset and reflash via UF2).
-2. **rnodeconf detects it** (`rnodeconf <PORT> -i` after provisioning).
-3. **Display shows the RNode boot screen.** The backlight is active LOW
-   (P1.12) — the first build got this wrong and produced a dark panel; the
-   polarity is confirmed by Meshtastic's `TFT_BACKLIGHT_ON=LOW` build flag.
-   Vext is P0.26, active high. If the image is offset or mirrored: the
-   `INITR_MINI160x80` variant/rotation may need adjusting
+Still to verify in the field:
+
+1. **RX** (traffic received / plausible RSSI, ~-100 dBm noise floor after
+   the 21 dB LNA compensation).
+2. **TX at low power first** (14-17 dBm against another node), then high
+   power with a proper antenna attached.
+3. **Battery voltage** plausible when on LiPo (divider assumed 4.916;
+   adjust the `0.017300` factor in `Power.h` if consistently off).
+4. **Button** flips display pages; **green LED** blinks on RX/TX.
+5. Display cosmetics: if the image is offset, mirrored, or color-inverted,
+   adjust the `INITR_MINI160x80` init/rotation in `Display.h`
    (`INITR_MINI160x80_PLUGIN` inverts colors; offsets are 24/0).
-4. **RX works** (see traffic / RSSI values plausible, ~-100 dBm noise floor
-   after LNA compensation).
-5. **TX works at low power first** (set 14-17 dBm, confirm with another
-   node), then verify high power with a proper antenna attached.
-6. **Battery voltage** plausible on the display/`rnodeconf -i` when on LiPo
-   (divider assumed 4.916; adjust `0.017300` in `Power.h` if consistently
-   off).
-7. **Button** flips display pages; **green LED** blinks on RX/TX.
