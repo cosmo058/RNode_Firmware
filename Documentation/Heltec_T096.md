@@ -99,6 +99,7 @@ The stock rnodeconf does not know this board. Patch the local
 | "Firmware corrupt" on display | Target hash unset (fresh provision), stale (set for a different build), or the device was UF2-flashed (see above). | After every reflash: `rnodeconf <PORT> -L`, then `--firmware-hash <hash>`, then let it reboot. If UF2-flashed, serial-DFU reflash first. |
 | Port number changes / device briefly gone | The nRF re-enumerates USB after every reset (including the self-reset after `--firmware-hash`). | Wait ~10-30 s, re-check the port list. |
 | `rnodeconf -i` crashes with `KeyError: 204` | Stock rnodeconf doesn't know model `0xCC`. | Apply the rnodeconf patch from [Prerequisites](#prerequisites-one-time-host-setup). |
+| `rnodeconf` gets zero response on *any* command (even `-L`), though the serial port opens fine | A phone or other host holds a BLE serial connection to the device (BLE serial is available on this nRF52 board), which blocks the USB-CDC interface from answering. | Disconnect/power off the BLE-paired device, then retry. |
 
 ## Hardware and port details
 
