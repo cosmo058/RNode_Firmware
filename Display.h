@@ -122,7 +122,13 @@
   #define SSD1306_WHITE ST77XX_WHITE
   #define SSD1306_BLACK ST77XX_BLACK
 #elif BOARD_MODEL == BOARD_HELTEC_T096
-  SPIClass displaySPI = SPIClass(NRF_SPIM0, DISPLAY_MISO, DISPLAY_CLK, DISPLAY_MOSI);
+  // NRF_SPIM3, not SPIM0: on this core the radio's SPI object is
+  // SPIM2 and the T114 display runs on SPIM3, leaving SPIM3 free
+  // here. SPIM0 shares its peripheral ID with TWI0/SPIS0, and a
+  // display on it hung in its first transfer after every warm
+  // reset (reset button, rnodeconf reboots), freezing boot until
+  // a DFU reflash. On SPIM3 the display survives warm resets.
+  SPIClass displaySPI = SPIClass(NRF_SPIM3, DISPLAY_MISO, DISPLAY_CLK, DISPLAY_MOSI);
   Adafruit_ST7735 display = Adafruit_ST7735(&displaySPI, DISPLAY_CS, DISPLAY_DC, DISPLAY_RST);
   #define SSD1306_WHITE ST77XX_WHITE
   #define SSD1306_BLACK ST77XX_BLACK

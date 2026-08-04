@@ -11,7 +11,8 @@ manufacturer's published conduction test data.
 > **Status:** verified on real hardware 2026-07-16 — display, provisioning,
 > EEPROM, firmware validation all working (device cb:cc:46, serial
 > 00:00:00:02). Radio RX/TX and battery telemetry not yet field-tested.
-> Three hardware bring-up bugs were found and fixed; they are all described
+> Four hardware bring-up bugs were found and fixed (the fourth — warm
+> resets freezing the device — on 2026-08-04); they are all described
 > in [Troubleshooting](#troubleshooting) so nobody has to rediscover them.
 
 ---
@@ -95,7 +96,7 @@ The stock rnodeconf does not know this board. Patch the local
 | Screen completely dark | Backlight pin P1.12 is active **low** — declared only in Meshtastic's `platformio.ini` (`TFT_BACKLIGHT_ON=LOW`), not in `variant.h`. | Fixed in `Display.h` (commit `83fecab`). When porting from Meshtastic, always read `platformio.ini` build flags too. |
 | `rnodeconf` says "Could not download EEPROM" although the firmware version was read | rnodeconf gives the device only 0.6 s to answer. Per-pixel TFT drawing (~8000 SPI transactions/frame) stalled the main loop past that deadline. | Fixed with bulk row transfers (commit `e925999`). If it still happens right after a reboot, simply retry — the device is busiest during its first seconds. |
 | Device frozen after provisioning: USB port enumerates but nothing answers, screen black/stuck | Firmware was flashed via **UF2 drag-and-drop**, which leaves the bootloader's image-size record (flash `0xFF008`) erased. On a *provisioned* device, boot-time firmware validation then hashed a bogus 4 GB region and hard-faulted. | Reflash over **serial DFU** (`arduino-cli upload`), which writes the record. Firmware now also guards against this (`Device.h`): a UF2-flashed device fails validation gracefully ("Firmware corrupt") instead of freezing. |
-| Device stops responding during provisioning or `--firmware-hash`; rnodeconf hangs | The emulated EEPROM commits every byte to internal flash individually (~160 writes for provisioning); the device can wedge during such write storms while USB stays enumerated. The writes themselves usually complete first. | Reflash over serial DFU — the 1200 baud touch works even when the app is frozen and doubles as a remote reset. Then verify with `-i` / `-K` / `-L`; the interrupted writes are usually intact. |
+| Device frozen after **any warm reset** — reset button, `rnodeconf` provisioning/`--firmware-hash` self-reboots, KISS `CMD_RESET`: USB enumerates but nothing answers, screen dark | The display originally sat on **SPIM0**, whose peripheral ID is shared with TWI0/SPIS0. After every warm reset (but never a cold DFU/power-on boot) the first SPI transfer of the display init spun forever, freezing `setup()` before the serial responder started. Cold boots masked it, so it looked like random wedging during EEPROM writes — the actual trigger was the reboot that follows them. | Fixed in `Display.h` by moving the display to **SPIM3**, mirroring the working T114 arrangement (radio is on SPIM2 on this core). Verified over repeated software resets and hash-write self-reboots. If it ever recurs: reflash over serial DFU — the 1200 baud touch works even when the app is frozen and doubles as a remote reset; EEPROM writes interrupted by the freeze are usually intact (verify with `-i` / `-K` / `-L`). |
 | "Firmware corrupt" on display | Target hash unset (fresh provision), stale (set for a different build), or the device was UF2-flashed (see above). | After every reflash: `rnodeconf <PORT> -L`, then `--firmware-hash <hash>`, then let it reboot. If UF2-flashed, serial-DFU reflash first. |
 | Port number changes / device briefly gone | The nRF re-enumerates USB after every reset (including the self-reset after `--firmware-hash`). | Wait ~10-30 s, re-check the port list. |
 | `rnodeconf -i` crashes with `KeyError: 204` | Stock rnodeconf doesn't know model `0xCC`. | Apply the rnodeconf patch from [Prerequisites](#prerequisites-one-time-host-setup). |
@@ -177,8 +178,10 @@ below 28 dBm — check your local rules before turning it up.
 
 The 0.96" 80x160 ST7735S TFT is driven by the standard Adafruit ST7735
 library (`INITR_MINI160x80`, which applies the panel's 24-pixel column
-offset) over a dedicated SPIM0 bus, following the T-Deck's unbuffered-TFT
-code path. Default orientation is portrait; the display rotation can be
+offset) over a dedicated **SPIM3** bus, following the T-Deck's
+unbuffered-TFT code path. Do not move it to SPIM0: that instance shares
+its peripheral ID with TWI0/SPIS0 and hung the first display transfer
+after every warm reset (see Troubleshooting). Default orientation is portrait; the display rotation can be
 changed with `rnodeconf --display-rotation`. Backlight is on/off only
 (no intensity control), tied to the display blanking timer.
 
@@ -210,6 +213,11 @@ Verified on the real device (2026-07-16): USB enumeration and serial DFU
 flashing, display (portrait, rotation 0, correct backlight), EEPROM
 provisioning as `cb:cc:46`, device signature validation, firmware hash
 validation (target == actual, no "Firmware corrupt").
+
+Verified 2026-08-04: warm reset survival (KISS `CMD_RESET` software
+resets and `--firmware-hash` self-reboots, 5 consecutive) after moving
+the display to SPIM3 — previously every warm reset froze the device
+until a serial-DFU reflash.
 
 Still to verify in the field:
 
