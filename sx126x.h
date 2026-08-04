@@ -52,6 +52,7 @@ public:
   virtual void flush();
 
   void onReceive(void(*callback)(int));
+  void onTxWait(void(*callback)());
 
   void receive(int size = 0);
   void standby();
@@ -138,6 +139,7 @@ private:
   uint8_t _packet[255];
   bool _preinit_done;
   void (*_onReceive)(int);
+  void (*_onTxWait)();
 };
 
 extern sx126x sx126x_modem;

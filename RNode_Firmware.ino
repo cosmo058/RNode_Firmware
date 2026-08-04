@@ -43,6 +43,9 @@ volatile bool serial_buffering = false;
 
 #if PLATFORM == PLATFORM_ESP32 || PLATFORM == PLATFORM_NRF52
   #define MODEM_QUEUE_SIZE 8
+  // One extra buffer over the queue depth, since the main loop
+  // holds on to one packet while writing it to the host
+  #define MODEM_POOL_SIZE (MODEM_QUEUE_SIZE+1)
   typedef struct {
           size_t len;
           int rssi;
@@ -50,6 +53,10 @@ volatile bool serial_buffering = false;
           uint8_t data[];
   } modem_packet_t;
   static xQueueHandle modem_packet_queue = NULL;
+  // Preallocated packet buffers, handed out through a queue acting
+  // as a free-list, so the radio interrupt never calls malloc
+  static xQueueHandle modem_packet_pool = NULL;
+  static uint8_t modem_packet_pool_buf[MODEM_POOL_SIZE][sizeof(modem_packet_t)+MTU] __attribute__((aligned(4)));
 #endif
 
 char sbuf[128];
@@ -57,6 +64,11 @@ char sbuf[128];
 #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
   bool packet_ready = false;
 #endif
+
+// True while transmit() is waiting for the modem to finish
+// sending. Blocks the CSMA queue handler so housekeeping run
+// during the TX wait can never start a nested transmission.
+volatile bool tx_in_progress = false;
 
 void setup() {
   #if MCU_VARIANT == MCU_ESP32
@@ -177,10 +189,17 @@ void setup() {
 
   #if PLATFORM == PLATFORM_ESP32 || PLATFORM == PLATFORM_NRF52
     modem_packet_queue = xQueueCreate(MODEM_QUEUE_SIZE, sizeof(modem_packet_t*));
+    modem_packet_pool  = xQueueCreate(MODEM_POOL_SIZE, sizeof(modem_packet_t*));
+    for (int i = 0; i < MODEM_POOL_SIZE; i++) {
+      modem_packet_t* modem_packet = (modem_packet_t*)modem_packet_pool_buf[i];
+      xQueueSend(modem_packet_pool, &modem_packet, 0);
+    }
   #endif
 
   // Set chip select, reset and interrupt
   // pins for the LoRa module
+  LoRa->onTxWait(tx_wait_housekeeping);
+
   #if MODEM == SX1276 || MODEM == SX1278
   LoRa->setPins(pin_cs, pin_reset, pin_dio, pin_busy);
   #elif MODEM == SX1262
@@ -317,35 +336,56 @@ void lora_receive() {
   }
 }
 
+#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+  // Assembly buffer for complete KISS frames. Worst case, every
+  // payload byte is escaped, plus FEND, CMD_DATA and closing FEND.
+  uint8_t kiss_frame_buf[MTU*2+3];
+#endif
+
 inline void kiss_write_packet() {
-  serial_write(FEND);
-  serial_write(CMD_DATA);
-  
-  for (uint16_t i = 0; i < host_write_len; i++) {
+  #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+    // Assemble the complete escaped frame and hand it to the serial
+    // layer in a single call, instead of dispatching byte-by-byte
+    uint16_t frame_len = 0;
+    kiss_frame_buf[frame_len++] = FEND;
+    kiss_frame_buf[frame_len++] = CMD_DATA;
+
     #if MCU_VARIANT == MCU_NRF52
       portENTER_CRITICAL();
+    #endif
+    for (uint16_t i = 0; i < host_write_len; i++) {
       uint8_t byte = pbuf[i];
+      if      (byte == FEND) { kiss_frame_buf[frame_len++] = FESC; byte = TFEND; }
+      else if (byte == FESC) { kiss_frame_buf[frame_len++] = FESC; byte = TFESC; }
+      kiss_frame_buf[frame_len++] = byte;
+    }
+    #if MCU_VARIANT == MCU_NRF52
       portEXIT_CRITICAL();
-    #else
-      uint8_t byte = pbuf[i];
     #endif
 
-    if (byte == FEND) { serial_write(FESC); byte = TFEND; }
-    if (byte == FESC) { serial_write(FESC); byte = TFESC; }
-    serial_write(byte);
-  }
-
-  serial_write(FEND);
-  host_write_len = 0;
-
-  #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+    kiss_frame_buf[frame_len++] = FEND;
+    serial_write_buf(kiss_frame_buf, frame_len);
+    host_write_len = 0;
     packet_ready = false;
-  #endif
 
-  #if MCU_VARIANT == MCU_ESP32
-    #if HAS_BLE
-      bt_flush();
+    #if MCU_VARIANT == MCU_ESP32
+      #if HAS_BLE
+        bt_flush();
+      #endif
     #endif
+  #else
+    serial_write(FEND);
+    serial_write(CMD_DATA);
+
+    for (uint16_t i = 0; i < host_write_len; i++) {
+      uint8_t byte = pbuf[i];
+      if (byte == FEND) { serial_write(FESC); byte = TFEND; }
+      if (byte == FESC) { serial_write(FESC); byte = TFESC; }
+      serial_write(byte);
+    }
+
+    serial_write(FEND);
+    host_write_len = 0;
   #endif
 }
 
@@ -466,10 +506,11 @@ void ISR_VECT receive_callback(int packet_size) {
         kiss_write_packet(); read_len = 0;
       
       #else
-        // Allocate packet struct, but abort if there
-        // is not enough memory available.
-        modem_packet_t *modem_packet = (modem_packet_t*)malloc(sizeof(modem_packet_t) + read_len);
-        if(!modem_packet) { memory_low = true; return; }
+        // Grab a preallocated packet buffer from the pool. If the
+        // pool is empty, the host is not draining the queue fast
+        // enough, and the packet is dropped.
+        modem_packet_t *modem_packet = NULL;
+        if (!modem_packet_pool || xQueueReceiveFromISR(modem_packet_pool, &modem_packet, NULL) != pdTRUE || !modem_packet) { read_len = 0; return; }
 
         // Get packet RSSI and SNR
         #if MCU_VARIANT == MCU_ESP32
@@ -477,13 +518,12 @@ void ISR_VECT receive_callback(int packet_size) {
           modem_packet->rssi = LoRa->packetRssi(modem_packet->snr_raw);
         #endif
 
-        // Send packet to event queue, but free the
-        // allocated memory again if the queue is
-        // unable to receive the packet.
+        // Send packet to event queue, but return the buffer to
+        // the pool if the queue is unable to receive the packet.
         modem_packet->len = read_len;
         memcpy(modem_packet->data, pbuf, read_len); read_len = 0;
         if (!modem_packet_queue || xQueueSendFromISR(modem_packet_queue, &modem_packet, NULL) != pdPASS) {
-            free(modem_packet);
+            xQueueSendFromISR(modem_packet_pool, &modem_packet, NULL);
         }
       #endif
     }  
@@ -722,6 +762,7 @@ void update_airtime() {
 
 void transmit(uint16_t size) {
   if (radio_online) {
+    tx_in_progress = true;
     if (!promisc) {
       uint16_t  written = 0;
       uint8_t header  = random(256) & 0xF0;
@@ -765,6 +806,7 @@ void transmit(uint16_t size) {
       for (uint16_t i=0; i < size; i++) { LoRa->write(tbuf[i]); written++; }
       LoRa->endPacket(); add_airtime(written);
     }
+    tx_in_progress = false;
 
   } else { kiss_indicate_error(ERROR_TXFAILED); led_indicate_error(5); }
 }
@@ -1628,7 +1670,7 @@ void validate_status() {
 #endif
 
 void tx_queue_handler() {
-  if (!airtime_lock && queue_height > 0) {
+  if (!airtime_lock && !tx_in_progress && queue_height > 0) {
     if (csma_cw == -1) {
       csma_cw = random(cw_min, cw_max);
       cw_wait_target = csma_cw * csma_slot_ms;
@@ -1660,6 +1702,20 @@ void tx_queue_handler() {
 
 void work_while_waiting() { loop(); }
 
+// Called by the modem driver while it waits for a transmission
+// to complete. At long-airtime settings this wait can last many
+// seconds, so keep buffering serial input and refreshing the
+// display. Deliberately not a full loop() pass: incoming KISS
+// commands are only buffered, not processed, and the CSMA queue
+// handler is kept out via tx_in_progress, so the radio cannot
+// be reconfigured or restarted mid-transmission.
+void tx_wait_housekeeping() {
+  buffer_serial();
+  #if HAS_DISPLAY
+    if (disp_ready && !display_updating) update_display();
+  #endif
+}
+
 void loop() {
   if (radio_online) {
     #if MCU_VARIANT == MCU_ESP32
@@ -1669,7 +1725,7 @@ void loop() {
         last_rssi      = modem_packet->rssi;
         last_snr_raw   = modem_packet->snr_raw;
         memcpy(&pbuf, modem_packet->data, modem_packet->len);
-        free(modem_packet);
+        xQueueSend(modem_packet_pool, &modem_packet, 0);
         modem_packet = NULL;
 
         kiss_indicate_stat_rssi();
@@ -1686,7 +1742,7 @@ void loop() {
       if(modem_packet_queue && xQueueReceive(modem_packet_queue, &modem_packet, 0) == pdTRUE && modem_packet) {
         memcpy(&pbuf, modem_packet->data, modem_packet->len);
         host_write_len = modem_packet->len;
-        free(modem_packet);
+        xQueueSend(modem_packet_pool, &modem_packet, 0);
         modem_packet = NULL;
 
         portENTER_CRITICAL();

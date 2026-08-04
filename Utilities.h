@@ -836,6 +836,32 @@ void serial_write(uint8_t byte) {
 	#endif
 }
 
+// Writes a complete, pre-framed buffer to the host in a single
+// call, so the interface dispatch and per-byte call overhead is
+// only paid once per frame instead of once per byte.
+void serial_write_buf(const uint8_t* buf, size_t len) {
+	if (len == 0) { return; }
+	#if HAS_BLUETOOTH || HAS_BLE == true
+		if (bt_state != BT_STATE_CONNECTED) {
+			#if HAS_WIFI
+				if (wifi_host_is_connected()) { wifi_remote_write(buf, len); }
+				else                          { Serial.write(buf, len); }
+			#else
+				Serial.write(buf, len);
+			#endif
+		} else {
+			SerialBT.write(buf, len);
+			#if MCU_VARIANT == MCU_NRF52 && HAS_BLE
+				// Buffers written through this path always contain whole
+				// frames, so the TX buffer can be flushed immediately
+				if (buf[len-1] == FEND) { SerialBT.flushTXD(); serial_in_frame = false; }
+			#endif
+		}
+	#else
+		Serial.write(buf, len);
+	#endif
+}
+
 void escaped_serial_write(uint8_t byte) {
 	if (byte == FEND) { serial_write(FESC); byte = TFEND; }
     if (byte == FESC) { serial_write(FESC); byte = TFESC; }

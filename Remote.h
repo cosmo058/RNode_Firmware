@@ -195,6 +195,7 @@ uint8_t wifi_remote_read() {
 }
 
 void wifi_remote_write(uint8_t byte) { if (connection) { connection.write(byte); } }
+void wifi_remote_write(const uint8_t* buf, size_t len) { if (connection) { connection.write(buf, len); } }
 
 void wifi_update_status() {
   wr_wifi_status = WiFi.status();

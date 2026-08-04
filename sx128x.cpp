@@ -90,7 +90,7 @@ sx128x::sx128x() :
   _spiSettings(8E6, MSBFIRST, SPI_MODE0),
   _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN), _rxen(pin_rxen), _busy(LORA_DEFAULT_BUSY_PIN), _txen(pin_txen),
   _frequency(0), _txp(0), _sf(0x05), _bw(0x34), _cr(0x01), _packetIndex(0), _implicitHeaderMode(0), _payloadLength(255), _crcMode(0), _fifo_tx_addr_ptr(0),
-  _fifo_rx_addr_ptr(0), _rxPacketLength(0), _preinit_done(false), _tcxo(false) { setTimeout(0); }
+  _fifo_rx_addr_ptr(0), _rxPacketLength(0), _preinit_done(false), _tcxo(false), _onTxWait(NULL) { setTimeout(0); }
 
 bool ISR_VECT sx128x::getPacketValidity() {
     uint8_t buf[2];
@@ -386,6 +386,9 @@ int sx128x::endPacket() {
     buf[0] = 0x00;
     buf[1] = 0x00;
     executeOpcodeRead(OP_GET_IRQ_STATUS_8X, buf, 2);
+    // At long-airtime settings this loop can run for many seconds,
+    // so let the firmware service serial input and the display
+    if (_onTxWait) { _onTxWait(); }
     yield();
   }
 
@@ -523,6 +526,10 @@ int sx128x::peek() {
   return b;
 }
 
+
+void sx128x::onTxWait(void(*callback)()) {
+  _onTxWait = callback;
+}
 
 void sx128x::onReceive(void(*callback)(int)) {
   _receive_callback = callback;

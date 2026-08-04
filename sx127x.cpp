@@ -78,7 +78,7 @@ extern SPIClass SPI;
 sx127x::sx127x() :
   _spiSettings(8E6, MSBFIRST, SPI_MODE0),
   _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN),
-  _frequency(0), _packetIndex(0), _preinit_done(false), _onReceive(NULL) { setTimeout(0); }
+  _frequency(0), _packetIndex(0), _preinit_done(false), _onReceive(NULL), _onTxWait(NULL) { setTimeout(0); }
 
 void sx127x::setSPIFrequency(uint32_t frequency) { _spiSettings = SPISettings(frequency, MSBFIRST, SPI_MODE0); }
 void sx127x::setPins(int ss, int reset, int dio0, int busy) { _ss = ss; _reset = reset; _dio0 = dio0; _busy = busy; }
@@ -186,6 +186,9 @@ int sx127x::endPacket() {
 
   // Wait for TX completion
   while ((readRegister(REG_IRQ_FLAGS_7X) & IRQ_TX_DONE_MASK_7X) == 0) {
+    // At long-airtime settings this loop can run for many seconds,
+    // so let the firmware service serial input and the display
+    if (_onTxWait) { _onTxWait(); }
     yield();
   }
 
@@ -302,6 +305,10 @@ int sx127x::peek() {
   writeRegister(REG_FIFO_ADDR_PTR_7X, currentAddress);
 
   return b;
+}
+
+void sx127x::onTxWait(void(*callback)()) {
+  _onTxWait = callback;
 }
 
 void sx127x::onReceive(void(*callback)(int)) {

@@ -126,7 +126,8 @@ sx126x::sx126x() :
   _fifo_rx_addr_ptr(0),
   _packet({0}),
   _preinit_done(false),
-  _onReceive(NULL)
+  _onReceive(NULL),
+  _onTxWait(NULL)
 { setTimeout(0); }
 
 bool sx126x::preInit() {
@@ -208,12 +209,36 @@ void sx126x::waitOnBusy() {
   }
 }
 
+// Bulk SPI helpers. Transferring whole buffers in a single call
+// avoids paying the per-transfer overhead of the SPI HAL for
+// every byte, which substantially shortens time spent in the
+// receive interrupt and in modem status polling.
+static inline void spi_write_bytes(const uint8_t* buffer, size_t size) {
+  #if MCU_VARIANT == MCU_ESP32
+    SPI.writeBytes(buffer, size);
+  #elif MCU_VARIANT == MCU_NRF52
+    SPI.transfer(buffer, NULL, size);
+  #else
+    for (size_t i = 0; i < size; i++) { SPI.transfer(buffer[i]); }
+  #endif
+}
+
+static inline void spi_read_bytes(uint8_t* buffer, size_t size) {
+  #if MCU_VARIANT == MCU_ESP32
+    SPI.transferBytes(NULL, buffer, size);
+  #elif MCU_VARIANT == MCU_NRF52
+    SPI.transfer(NULL, buffer, size);
+  #else
+    for (size_t i = 0; i < size; i++) { buffer[i] = SPI.transfer(0x00); }
+  #endif
+}
+
 void sx126x::executeOpcode(uint8_t opcode, uint8_t *buffer, uint8_t size) {
   waitOnBusy();
   digitalWrite(_ss, LOW);
   SPI.beginTransaction(_spiSettings);
   SPI.transfer(opcode);
-  for (int i = 0; i < size; i++) { SPI.transfer(buffer[i]); }
+  spi_write_bytes(buffer, size);
   SPI.endTransaction();
   digitalWrite(_ss, HIGH);
 }
@@ -224,7 +249,7 @@ void sx126x::executeOpcodeRead(uint8_t opcode, uint8_t *buffer, uint8_t size) {
   SPI.beginTransaction(_spiSettings);
   SPI.transfer(opcode);
   SPI.transfer(0x00);
-  for (int i = 0; i < size; i++) { buffer[i] = SPI.transfer(0x00); }
+  spi_read_bytes(buffer, size);
   SPI.endTransaction();
   digitalWrite(_ss, HIGH);
 }
@@ -235,7 +260,8 @@ void sx126x::writeBuffer(const uint8_t* buffer, size_t size) {
   SPI.beginTransaction(_spiSettings);
   SPI.transfer(OP_FIFO_WRITE_6X);
   SPI.transfer(_fifo_tx_addr_ptr);
-  for (int i = 0; i < size; i++) { SPI.transfer(buffer[i]); _fifo_tx_addr_ptr++; }
+  spi_write_bytes(buffer, size);
+  _fifo_tx_addr_ptr += size;
   SPI.endTransaction();
   digitalWrite(_ss, HIGH);
 }
@@ -247,7 +273,7 @@ void sx126x::readBuffer(uint8_t* buffer, size_t size) {
   SPI.transfer(OP_FIFO_READ_6X);
   SPI.transfer(_fifo_rx_addr_ptr);
   SPI.transfer(0x00);
-  for (int i = 0; i < size; i++) { buffer[i] = SPI.transfer(0x00); }
+  spi_read_bytes(buffer, size);
   SPI.endTransaction();
   digitalWrite(_ss, HIGH);
 }
@@ -474,6 +500,9 @@ int sx126x::endPacket() {
     buf[0] = 0x00;
     buf[1] = 0x00;
     executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
+    // At long-airtime settings this loop can run for many seconds,
+    // so let the firmware service serial input and the display
+    if (_onTxWait) { _onTxWait(); }
     yield();
   }
 
@@ -622,6 +651,10 @@ int sx126x::peek() {
 }
 
 void sx126x::flush() { }
+
+void sx126x::onTxWait(void(*callback)()){
+  _onTxWait = callback;
+}
 
 void sx126x::onReceive(void(*callback)(int)){
   _onReceive = callback;

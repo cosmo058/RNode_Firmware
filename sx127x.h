@@ -54,6 +54,7 @@ public:
   virtual void flush();
 
   void onReceive(void(*callback)(int));
+  void onTxWait(void(*callback)());
 
   void receive(int size = 0);
   void standby();
@@ -107,6 +108,7 @@ private:
   int _implicitHeaderMode;
   bool _preinit_done;
   void (*_onReceive)(int);
+  void (*_onTxWait)();
 };
 
 extern sx127x sx127x_modem;

@@ -51,6 +51,7 @@ public:
   virtual void flush();
 
   void onReceive(void(*callback)(int));
+  void onTxWait(void(*callback)());
 
   void receive(int size = 0);
   void standby();
@@ -139,6 +140,7 @@ private:
   int _rxPacketLength;
   uint32_t _bitrate;
   void (*_receive_callback)(int);
+  void (*_onTxWait)();
 };
 
 extern sx128x sx128x_modem;
