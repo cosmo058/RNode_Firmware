@@ -53,7 +53,9 @@ below the PA's 19 dBm saturation limit.
 Ships with one of two FEM chips. The firmware detects which one at
 boot by powering the FEM and reading back the CSD pin
 (`sx126x.cpp`), then applies the matching TX gain table and LNA
-compensation (17 dB for the GC1109, 21 dB for the KCT8103L).
+compensation (17 dB for the GC1109, 21 dB for the KCT8103L). Full
+details, including a provisioning gotcha shared with the Station G2,
+in [Heltec_V4.md](Heltec_V4.md).
 
 ### Heltec T096
 
